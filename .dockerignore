@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+.env
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+tests
+outputs
+work
+.idea
+.vscode

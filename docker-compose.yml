@@ -1,0 +1,91 @@
+x-app-environment: &app-environment
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tenantforge}:${POSTGRES_PASSWORD:-tenantforge}@postgres:5432/${POSTGRES_DB:-tenantforge}
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET: ${JWT_SECRET:-tenantforge-local-jwt-secret-change-this}
+  BILLING_WEBHOOK_SECRET: ${BILLING_WEBHOOK_SECRET:-tenantforge-local-billing-secret}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+  REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-30}
+  INVITATION_EXPIRE_DAYS: ${INVITATION_EXPIRE_DAYS:-7}
+  USER_RATE_LIMIT_PER_MINUTE: ${USER_RATE_LIMIT_PER_MINUTE:-100}
+  API_RATE_LIMIT_PER_MINUTE: ${API_RATE_LIMIT_PER_MINUTE:-60}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  api:
+    build:
+      context: .
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log
+    environment: *app-environment
+    init: true
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+    command: ["python", "-m", "app.workers.worker"]
+    environment: *app-environment
+    init: true
+    depends_on:
+      api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tenantforge}
+      POSTGRES_USER: ${POSTGRES_USER:-tenantforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tenantforge}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
